@@ -1,10 +1,8 @@
 import torch
 import torch.nn as nn
 from transformers import Wav2Vec2Processor
-from transformers.models.wav2vec2.modeling_wav2vec2 import (
-    Wav2Vec2Model,
-    Wav2Vec2PreTrainedModel,
-)
+from modelscope.pipelines import pipeline
+from modelscope.utils.constant import Tasks
 import os
 import librosa
 import numpy as np
@@ -31,92 +29,65 @@ class RegressionHead(nn.Module):
         return x
 
 
-class EmotionModel(Wav2Vec2PreTrainedModel):
+class EmotionModel(nn.Module):
     r"""Speech emotion classifier."""
 
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self):
+        super().__init__()
+        # Initialize emotion2vec pipeline
+        self.emotion_pipeline = pipeline(
+            task=Tasks.emotion_recognition,
+            model="iic/emotion2vec_plus_large"
+        )
 
-        self.config = config
-        self.wav2vec2 = Wav2Vec2Model(config)
-        self.classifier = RegressionHead(config)
-        self.init_weights()
-
-    def forward(
-            self,
-            input_values,
-    ):
-        outputs = self.wav2vec2(input_values)
-        hidden_states = outputs[0]
-        hidden_states = torch.mean(hidden_states, dim=1)
-        logits = self.classifier(hidden_states)
-
-        return hidden_states, logits
+    def forward(self, file_path):
+        # Directly use file path as input for emotion2vec
+        outputs = self.emotion_pipeline(file_path, granularity="utterance", extract_embedding=True)
+        embedding = outputs[0]['feats']  # Extract the embedding
+        return torch.tensor(embedding).unsqueeze(0)
 
 
-# load model from hub
+# Instantiate the model
 device = 'cuda' if torch.cuda.is_available() else "cpu"
-model_name = 'audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim'
-processor = Wav2Vec2Processor.from_pretrained(model_name)
-model = EmotionModel.from_pretrained(model_name).to(device)
+emotion_model = EmotionModel().to(device)
 
 
 def process_func(
-        x: np.ndarray,
-        sampling_rate: int,
+        file_path: str,
         embeddings: bool = False,
 ) -> np.ndarray:
-    r"""Predict emotions or extract embeddings from raw audio signal."""
+    r"""Predict emotions or extract embeddings from audio file."""
 
-    # run through processor to normalize signal
-    # always returns a batch, so we just get the first entry
-    # then we put it on the device
-    y = processor(x, sampling_rate=sampling_rate)
-    y = y['input_values'][0]
-    y = torch.from_numpy(y).to(device)
-    y = y.unsqueeze(0)
     # run through model
     with torch.no_grad():
-        y = model(y)[0 if embeddings else 1]
+        embedding = emotion_model(file_path)
 
     # convert to numpy
-    y = y.detach().cpu().numpy()
-
-    return y
-
-
-#
-#
-# def disp(rootpath, wavname):
-#     wav, sr = librosa.load(f"{rootpath}/{wavname}", 16000)
-#     display(ipd.Audio(wav, rate=sr))
-
-rootpath = "/home/shixiaohan-toda/Desktop/Cooperation/DSX/Database/IEMOCAP_ALL_16K"
-embs = []
-wavnames = []
+    return embedding.detach().cpu().numpy()
 
 
 def extract_dir(path):
-    rootpath = path
-    for idx, wavname in enumerate(os.listdir(rootpath)):
-        wav, sr = librosa.load(f"{rootpath}/{wavname}", 16000)
-        emb = process_func(np.expand_dims(wav, 0), sr, embeddings=True)
+    embs = []
+    wavnames = []
+    for idx, wavname in enumerate(os.listdir(path)):
+        file_path = os.path.join(path, wavname)
+        if not wavname.endswith(".wav"):
+            continue
+        emb = process_func(file_path, embeddings=True)
         embs.append(emb)
         wavnames.append(wavname)
-        np.save(f"{rootpath}/{wavname}.emo.npy", emb.squeeze(0))
+        np.save(f"{file_path}.emo.npy", emb.squeeze(0))
         print(idx, wavname)
 
 
-def extract_wav(path):
-    wav, sr = librosa.load(path, 16000)
-    emb = process_func(np.expand_dims(wav, 0), sr, embeddings=True)
+def extract_wav(file_path):
+    emb = process_func(file_path, embeddings=True)
     return emb
 
 
-def preprocess_one(path):
-    wav, sr = librosa.load(path, 16000)
-    emb = process_func(np.expand_dims(wav, 0), sr, embeddings=True)
-    np.save(f"{path}.emo.npy", emb.squeeze(0))
+def preprocess_one(file_path):
+    emb = process_func(file_path, embeddings=True)
+    np.save(f"{file_path}.emo.npy", emb.squeeze(0))
     return emb
 
 
@@ -124,16 +95,13 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description='Emotion Extraction Preprocess')
-    parser.add_argument('--filelists', dest='filelists',nargs="+", type=str, help='path of the filelists')
+    parser.add_argument('--filelists', dest='filelists', nargs="+", type=str, help='path of the filelists')
     args = parser.parse_args()
 
     for filelist in args.filelists:
-        print(filelist,"----start emotion extract-------")
+        print(filelist, "----start emotion extract-------")
         with open(filelist) as f:
             for idx, line in enumerate(f.readlines()):
-                path = line.strip().split("|")[0]
-                preprocess_one(path)
-                print(idx, path)
-
-
-
+                file_path = line.strip().split("|")[0]
+                preprocess_one(file_path)
+                print(idx, file_path)

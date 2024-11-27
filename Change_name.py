@@ -1,15 +1,42 @@
-# Open the input file in read mode and output file in write mode
-input_file = "/home/shixiaohan-toda/Desktop/Conferences/Interspeech_2025_EMO_TTS/emotional-vits-main/filelists/ljs_audio_text_val_filelist.txt.cleaned"  # Replace with your input file name
-output_file = "/home/shixiaohan-toda/Desktop/Conferences/Interspeech_2025_EMO_TTS/emotional-vits-main/filelists/ljs_audio_text_val_filelist.txt.cleaned_1.txt"  # Replace with your output file name
+import os
+import shutil
 
-# Open the input and output files
-with open(input_file, "r", encoding="utf-8") as infile, open(output_file, "w", encoding="utf-8") as outfile:
-    # Iterate through each line in the input file
-    for line in infile:
-        # Split the line into components using the first "|"
-        parts = line.strip().split("|", 1)
-        if len(parts) == 2:  # Ensure there are exactly two parts
-            # Add the "0" as the second column
-            new_line = f"{parts[0]}|0|{parts[1]}"
-            # Write the new line to the output file
-            outfile.write(new_line + "\n")
+def extract_copy_and_update(file_path, destination_folder, updated_file_path):
+    # 创建目标文件夹，如果不存在
+    if not os.path.exists(destination_folder):
+        os.makedirs(destination_folder)
+
+    # 打开原始文件，准备读取和写入新文件
+    with open(file_path, 'r') as infile, open(updated_file_path, 'w') as outfile:
+        for line in infile:
+            # 提取每行的第一个字段（文件路径）和其他内容
+            parts = line.strip().split('|')
+            original_path = parts[0]
+            other_content = '|'.join(parts[1:])
+
+            # 确定新的文件路径
+            file_name = os.path.basename(original_path)
+            new_path = os.path.join(destination_folder, file_name)
+
+            # 复制文件到目标文件夹
+            if os.path.exists(original_path):
+                shutil.copy(original_path, new_path)
+                print(f"Copied: {original_path} to {new_path}")
+            else:
+                print(f"File not found: {original_path}")
+                continue  # 跳过不存在的文件
+
+            # 写入新文件的内容
+            updated_line = f"{new_path}|{other_content}\n"
+            outfile.write(updated_line)
+
+    print(f"Updated file saved to: {updated_file_path}")
+
+# 示例调用
+source_file = '/home/Shi22/nas01home/Conference/TTS_EMO/emotional-vits-main-ESD-E2V/filelists/test.txt'  # 替换为您的实际文件路径
+destination_dir = '/home/Shi22/nas01home/Conference/TTS_EMO/emotional-vits-main-ESD-E2V/test_wav'  # 替换为目标文件夹路径
+updated_txt = '/home/Shi22/nas01home/Conference/TTS_EMO/emotional-vits-main-ESD-E2V/filelists//updated_test.txt'  # 替换为新生成的 txt 文件路径
+
+extract_copy_and_update(source_file, destination_dir, updated_txt)
+
+
